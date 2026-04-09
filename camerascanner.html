@@ -1,0 +1,279 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Instavisit VPS Scanner</title>
+    <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;800&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-color: #0f172a;
+            --glass-bg: rgba(30, 41, 59, 0.7);
+            --glass-border: rgba(255, 255, 255, 0.1);
+            --primary: #6366f1;
+            --primary-hover: #4f46e5;
+            --text-main: #f8fafc;
+            --text-muted: #94a3b8;
+        }
+
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: 'Inter', sans-serif;
+            background: var(--bg-color);
+            color: var(--text-main);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            background: radial-gradient(circle at top right, #1e1b4b, #0f172a, #020617);
+        }
+
+        .scanner-container {
+            width: 90%;
+            max-width: 500px;
+            background: var(--glass-bg);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border: 1px solid var(--glass-border);
+            border-radius: 24px;
+            padding: 30px;
+            text-align: center;
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.5);
+        }
+
+        h1 {
+            margin-top: 0;
+            font-size: 24px;
+            font-weight: 800;
+            background: -webkit-linear-gradient(45deg, #818cf8, #c084fc);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        p {
+            color: var(--text-muted);
+            font-size: 14px;
+            margin-bottom: 20px;
+        }
+
+        .video-wrapper {
+            position: relative;
+            width: 100%;
+            border-radius: 16px;
+            overflow: hidden;
+            background: #000;
+            aspect-ratio: 3/4;
+            margin-bottom: 20px;
+            border: 2px solid var(--glass-border);
+        }
+
+        video {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+
+        .btn {
+            appearance: none;
+            border: none;
+            background: var(--primary);
+            color: white;
+            font-family: 'Inter', sans-serif;
+            font-size: 16px;
+            font-weight: 600;
+            padding: 14px 20px;
+            border-radius: 12px;
+            cursor: pointer;
+            width: 100%;
+            transition: all 0.3s ease;
+            margin-bottom: 10px;
+        }
+
+        .btn:hover {
+            background: var(--primary-hover);
+            transform: translateY(-2px);
+            box-shadow: 0 10px 20px rgba(99, 102, 241, 0.3);
+        }
+
+        .btn-secondary {
+            background: transparent;
+            border: 1px solid var(--glass-border);
+            color: var(--text-main);
+        }
+
+        .btn-secondary:hover {
+            background: rgba(255, 255, 255, 0.1);
+            border-color: rgba(255, 255, 255, 0.2);
+            box-shadow: none;
+        }
+
+        .result-box {
+            margin-top: 20px;
+            padding: 15px;
+            background: rgba(0, 0, 0, 0.3);
+            border-radius: 12px;
+            word-break: break-all;
+            display: none;
+        }
+
+        #snap-preview {
+            width: 100%;
+            border-radius: 16px;
+            display: none;
+            margin-bottom: 20px;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="scanner-container">
+        <h1>EXTERNAL SCANNER</h1>
+        <p>Arahkan wajah atau QR Code ke kamera</p>
+
+        <div class="video-wrapper" id="videoWrapper">
+            <video id="video" autoplay playsinline></video>
+        </div>
+        <img id="snap-preview" />
+        <canvas id="canvas" style="display:none;"></canvas>
+
+        <div class="result-box" id="resultBox">
+            <strong>Hasil QR:</strong> <br>
+            <span id="qrResult">-</span>
+        </div>
+
+        <div id="controls">
+            <button class="btn" id="btnScanQR" onclick="startScanMode()">🔍 MODE SCAN QR</button>
+            <button class="btn" id="btnPhoto" onclick="takeSnapshot()">📸 AMBIL FOTO</button>
+        </div>
+        <div id="postControls" style="display:none;">
+            <button class="btn" onclick="resetCamera()">♻️ ULANGI</button>
+            <button class="btn btn-secondary" onclick="sendData()">✅ GUNAKAN DATA INI</button>
+        </div>
+    </div>
+
+    <script>
+        const video = document.getElementById('video');
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        const qrResultText = document.getElementById('qrResult');
+        const resultBox = document.getElementById('resultBox');
+        const snapPreview = document.getElementById('snap-preview');
+        const videoWrapper = document.getElementById('videoWrapper');
+        const controls = document.getElementById('controls');
+        const postControls = document.getElementById('postControls');
+
+        let stream = null;
+        let scanningQR = false;
+        let capturedData = null;
+        let isPhoto = false;
+
+        async function startCamera() {
+            try {
+                stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+                video.srcObject = stream;
+                video.setAttribute("playsinline", true); // required to tell iOS safari we don't want fullscreen
+                video.play();
+                requestAnimationFrame(tick);
+            } catch (err) {
+                console.error("Error accessing camera:", err);
+                alert("Gagal mengakses kamera. Pastikan browser memiliki izin kamera statis ini.");
+            }
+        }
+
+        function startScanMode() {
+            scanningQR = true;
+            alert("Mode Scan QR aktif. Arahkan QR Code ke kamera.");
+        }
+
+        function tick() {
+            if (video.readyState === video.HAVE_ENOUGH_DATA && scanningQR) {
+                canvas.height = video.videoHeight;
+                canvas.width = video.videoWidth;
+                ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+                const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+                const code = jsQR(imageData.data, imageData.width, imageData.height, {
+                    inversionAttempts: "dontInvert",
+                });
+
+                if (code) {
+                    qrResultText.innerText = code.data;
+                    resultBox.style.display = 'block';
+                    scanningQR = false;
+                    capturedData = code.data;
+                    isPhoto = false;
+                    showPostControls();
+                }
+            }
+            if (!capturedData || scanningQR) {
+                requestAnimationFrame(tick);
+            }
+        }
+
+        function takeSnapshot() {
+            scanningQR = false;
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+            const dataUrl = canvas.toDataURL('image/jpeg', 0.8);
+            snapPreview.src = dataUrl;
+            videoWrapper.style.display = 'none';
+            snapPreview.style.display = 'block';
+
+            capturedData = dataUrl;
+            isPhoto = true;
+            showPostControls();
+        }
+
+        function showPostControls() {
+            controls.style.display = 'none';
+            postControls.style.display = 'block';
+        }
+
+        function resetCamera() {
+            capturedData = null;
+            scanningQR = false;
+            resultBox.style.display = 'none';
+            qrResultText.innerText = '-';
+            snapPreview.style.display = 'none';
+            videoWrapper.style.display = 'block';
+            controls.style.display = 'block';
+            postControls.style.display = 'none';
+            requestAnimationFrame(tick);
+        }
+
+        function sendData() {
+            // Here you define how the VPS static HTML talks back to the GAS App or window opener.
+            // Example: If opened via window.open, we can postMessage back
+            if (window.opener) {
+                window.opener.postMessage({
+                    type: isPhoto ? 'PHOTO_CAPTURED' : 'QR_SCANNED',
+                    payload: capturedData
+                }, "*");
+                window.close(); // Close this tab dynamically
+            } else {
+                // Fallback or copy to clipboard if standalone
+                if (!isPhoto) {
+                    navigator.clipboard.writeText(capturedData);
+                    alert("Data QR dicopy ke clipboard!");
+                } else {
+                    alert("Sistem standalone tidak dapat mengembalikan foto tanpa window.opener. Pastikan dibuka via aplikasi utama.");
+                }
+            }
+        }
+
+        // Stop camera when leaving
+        window.onbeforeunload = () => {
+            if (stream) stream.getTracks().forEach(track => track.stop());
+        };
+
+        // Init
+        window.onload = startCamera;
+    </script>
+</body>
+
+</html>

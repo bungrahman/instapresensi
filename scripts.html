@@ -1,0 +1,345 @@
+<script>
+  const swalConfig = { background: '#1e293b', color: '#f8fafc', confirmButtonColor: '#10b981', cancelButtonColor: '#64748b', borderRadius: '16px' };
+  window.alert = function(msg) {
+    let icon = 'info';
+    if (msg.toLowerCase().includes('berhasil') || msg.toLowerCase().includes('saved') || msg.toLowerCase().includes('selamat')) icon = 'success';
+    if (msg.toLowerCase().includes('error') || msg.toLowerCase().includes('gagal') || msg.toLowerCase().includes('salah') || msg.toLowerCase().includes('ditolak')) icon = 'error';
+    if (msg.toLowerCase().includes('kamera')) icon = 'warning';
+    Swal.fire({ text: msg, icon: icon, ...swalConfig });
+  };
+
+  let employeeData = {};
+  let appSettings = {};
+  let currentLocation = "Memproses lokasi...";
+
+  // SPA Navigation
+  function navigateTo(sectionId) {
+    document.querySelectorAll('section').forEach(s => {
+      s.classList.remove('active');
+      s.style.display = 'none';
+    });
+    const target = document.getElementById(sectionId);
+    if (target) {
+      target.style.display = 'block';
+      setTimeout(() => target.classList.add('active'), 10);
+    }
+  }
+
+  // SETTINGS MODULE
+  function openSettings() {
+    Swal.fire({
+      title: 'Settings',
+      input: 'password',
+      inputPlaceholder: 'Masukkan password admin...',
+      showCancelButton: true,
+      ...swalConfig
+    }).then((result) => {
+      if (!result.isConfirmed) return;
+      if (result.value !== "admin") return alert("Password salah!");
+      showLoader(true);
+      google.script.run
+        .withSuccessHandler(settings => {
+          showLoader(false);
+          appSettings = settings;
+          document.getElementById('setCompanyName').value = settings.COMPANY_NAME || '';
+          document.getElementById('setUrls').value = settings.NOTIFICATION_URLS || '';
+          document.getElementById('setFolderId').value = settings.DRIVE_FOLDER_ID || '';
+          document.getElementById('setDeptOptions').value = settings.DEPARTMENTS || '';
+          navigateTo('settings');
+        }).getSettings();
+    });
+  }
+
+  function saveSettings() {
+    const form = document.getElementById('settingsForm');
+    const formData = new FormData(form);
+    const newSettings = {};
+    for (let [k, v] of formData.entries()) newSettings[k] = v;
+
+    showLoader(true);
+    google.script.run
+      .withSuccessHandler(() => {
+        showLoader(false);
+        alert("Settings Saved!");
+        document.getElementById('companyName').textContent = newSettings.COMPANY_NAME || 'instapresensi';
+        populateDepartments(newSettings.DEPARTMENTS);
+        navigateTo('home');
+      }).updateSettings(newSettings);
+  }
+
+  function populateDepartments(optionsStr) {
+    const select = document.getElementById('regDept');
+    const options = optionsStr ? optionsStr.split(',').map(s => s.trim()) : [];
+    select.innerHTML = '<option value="" disabled selected>Select Department</option>';
+    options.forEach(opt => {
+      const el = document.createElement('option');
+      el.value = opt; el.textContent = opt; select.appendChild(el);
+    });
+  }
+
+  // GEOLOCATION MODULE
+  function grabLocation() {
+    const locTag = document.getElementById('locationStatus');
+    locTag.textContent = "📍 Mengambil lokasi GPSmu...";
+    locTag.style.color = "#fbbf24";
+    currentLocation = "Belum dapat lokasi GPS";
+
+    if (navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          currentLocation = pos.coords.latitude + ", " + pos.coords.longitude;
+          locTag.textContent = "📍 Lokasi terpantau (" + currentLocation + ")";
+          locTag.style.color = "#34d399";
+        },
+        (err) => {
+          currentLocation = "Akses GPS Ditolak / Timeout";
+          locTag.textContent = "📍 Gagal dapat titik lokasi (GPS mati/ditolak)";
+          locTag.style.color = "#fb7185";
+        },
+        { enableHighAccuracy: true, timeout: 5000, maximumAge: 0 }
+      );
+    } else {
+      currentLocation = "GPS tidak didukung browser ini";
+      locTag.textContent = "📍 " + currentLocation;
+      locTag.style.color = "#fb7185";
+    }
+  }
+
+  // PHOTO CAPTURE & EXTERNAL SCANNER MODULE
+  let currentFlow = 'clockin';
+  let stream = null;
+  const VPS_SCANNER_URL = "https://jejakkreasi.com/camerascanner.html";
+  let activeTargetInputId = null;
+
+  window.addEventListener("message", (event) => {
+      if (!event.data) return;
+      if (event.data.type === 'PHOTO_CAPTURED') {
+          employeeData.photo = event.data.payload;
+          const preview = document.getElementById('photo-preview');
+          preview.src = employeeData.photo;
+          preview.style.display = 'block';
+          document.getElementById('snapBtn').style.display = 'none';
+          document.getElementById('submitBtn').style.display = 'flex';
+          document.getElementById('retakeBtn').style.display = 'flex';
+          document.getElementById('photoPlaceholder').style.display = 'none';
+          stopCamera(); 
+      } else if (event.data.type === 'QR_SCANNED') {
+          if (activeTargetInputId) {
+              document.getElementById(activeTargetInputId).value = event.data.payload;
+              alert("QR Code Berhasil Di-scan: " + event.data.payload);
+          }
+      }
+  }, false);
+
+  async function startCamera() {
+    const video = document.getElementById('video-stream');
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' } });
+      video.srcObject = stream;
+      video.style.display = 'block';
+      document.getElementById('photoPlaceholder').style.display = 'none';
+    } catch (err) {
+      console.warn("Kamera ditolak: ", err);
+    }
+  }
+
+  function stopCamera() {
+    if (stream) {
+      stream.getTracks().forEach(track => track.stop());
+      stream = null;
+    }
+    document.getElementById('video-stream').style.display = 'none';
+  }
+
+  function takeSnapshot() {
+    window.open(VPS_SCANNER_URL, "ExternalScanner", "width=500,height=700");
+  }
+
+  function goToCamera(flow) {
+    currentFlow = flow;
+    
+    if (flow === 'register') {
+      const form = document.getElementById('regForm');
+      if (!form.checkValidity()) return form.reportValidity();
+      employeeData = {};
+      const formData = new FormData(form);
+      for (let [k, v] of formData.entries()) employeeData[k] = v;
+    } else if (flow === 'clockin') {
+      const id = document.getElementById('clockInId').value;
+      if (!id) return alert("Masukkan NIK atau Scan QR dulu!");
+    } else if (flow === 'clockout') {
+      const id = document.getElementById('clockOutId').value;
+      if (!id) return alert("Masukkan NIK atau Scan QR dulu!");
+    }
+
+    // Reset UI Kamera
+    document.getElementById('photoPlaceholder').style.display = 'flex';
+    document.getElementById('photo-preview').style.display = 'none';
+    document.getElementById('video-stream').style.display = 'none';
+    document.getElementById('snapBtn').style.display = 'flex';
+    document.getElementById('submitBtn').style.display = 'none';
+    document.getElementById('retakeBtn').style.display = 'none';
+    document.getElementById('fileInput').value = '';
+    employeeData.photo = null; 
+
+    navigateTo('camera');
+    grabLocation(); // Activate GPS module
+    startCamera();
+  }
+
+  function handlePhotoCapture(e) {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = function(event) {
+      employeeData.photo = event.target.result;
+      const preview = document.getElementById('photo-preview');
+      preview.src = employeeData.photo;
+      preview.style.display = 'block';
+      document.getElementById('photoPlaceholder').style.display = 'none';
+      document.getElementById('snapBtn').style.display = 'none';
+      document.getElementById('submitBtn').style.display = 'flex';
+      document.getElementById('retakeBtn').style.display = 'flex';
+    };
+    reader.readAsDataURL(file);
+  }
+
+  function retakePhoto() {
+    document.getElementById('photo-preview').style.display = 'none';
+    document.getElementById('photoPlaceholder').style.display = 'flex';
+    document.getElementById('snapBtn').style.display = 'flex';
+    document.getElementById('submitBtn').style.display = 'none';
+    document.getElementById('retakeBtn').style.display = 'none';
+    document.getElementById('fileInput').value = '';
+    startCamera();
+  }
+
+  function finalizeAction() {
+    if (!employeeData.photo) return alert("Silakan ambil foto selfie untuk absensi!");
+    
+    if (currentFlow === 'register') submitRegistration();
+    else if (currentFlow === 'clockin') submitClockIn();
+    else if (currentFlow === 'clockout') submitClockOut();
+  }
+
+  function submitRegistration() {
+    showLoader(true);
+    google.script.run
+      .withSuccessHandler(res => {
+        showLoader(false);
+        if (res.success) {
+          document.getElementById('successTitle').textContent = "Registrasi Berhasil!";
+          document.getElementById('successMessage').textContent = "Anda terdaftar sebagai karyawan.";
+          document.getElementById('badgeArea').style.display = 'block';
+          document.getElementById('badgeId').textContent = res.id;
+          document.getElementById('badgeName').textContent = employeeData.name;
+          document.getElementById('badgeCompany').textContent = document.getElementById('companyName').textContent || 'instapresensi';
+          document.getElementById('badgeDate').textContent = "Aktif: " + new Date().toLocaleDateString('id-ID');
+
+          const qrUrl = "https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=" + res.id;
+          document.getElementById('qrcode').innerHTML = '<img src="' + qrUrl + '" alt="QR" crossorigin="anonymous">';
+          navigateTo('success');
+        } else { alert("Error: " + res.error); }
+      }).withFailureHandler(onApiError).saveEmployee(employeeData);
+  }
+
+  function submitClockIn() {
+    const empId = document.getElementById('clockInId').value;
+    const payload = { empId: empId, photo: employeeData.photo, location: currentLocation };
+
+    showLoader(true);
+    google.script.run
+      .withSuccessHandler(res => {
+        showLoader(false);
+        if (res.success) {
+          document.getElementById('successTitle').textContent = "Clock-In Berhasil!";
+          document.getElementById('successMessage').textContent = "Selamat Bekerja, " + res.name + "!\nTitik Lokasi: " + currentLocation;
+          document.getElementById('badgeArea').style.display = 'none';
+          navigateTo('success');
+        } else { alert(res.error); }
+      }).withFailureHandler(onApiError).handleClockIn(payload);
+  }
+
+  function submitClockOut() {
+    const empId = document.getElementById('clockOutId').value;
+    const payload = { empId: empId, photo: employeeData.photo, location: currentLocation };
+
+    showLoader(true);
+    google.script.run
+      .withSuccessHandler(res => {
+        showLoader(false);
+        if (res.success) {
+          document.getElementById('successTitle').textContent = "Clock-Out Berhasil!";
+          document.getElementById('successMessage').textContent = "Terima kasih atas kerja keras Anda hari ini, " + res.name + "!";
+          document.getElementById('badgeArea').style.display = 'none';
+          navigateTo('success');
+        } else { alert(res.error); }
+      }).withFailureHandler(onApiError).handleClockOut(payload);
+  }
+
+  // QR CODE SCANNER
+  function scanQR(targetInputId) {
+    activeTargetInputId = targetInputId;
+    window.open(VPS_SCANNER_URL, "ExternalScanner", "width=500,height=700");
+  }
+
+  function handleScanner(event, flow) {
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      goToCamera(flow);
+    }
+  }
+
+  // UTILITIES
+  function onApiError(err) { showLoader(false); alert("Server error: " + err.toString()); }
+  function showLoader(show) { document.getElementById('loader').style.display = show ? 'flex' : 'none'; }
+  function resetApp() {
+    document.getElementById('regForm').reset();
+    document.getElementById('clockInId').value = '';
+    document.getElementById('clockOutId').value = '';
+    employeeData = {};
+    stopCamera();
+    navigateTo('home');
+  }
+
+  function downloadBadge() {
+    const canvas = document.createElement('canvas');
+    canvas.width = 400; canvas.height = 550;
+    const ctx = canvas.getContext('2d');
+    const badgeId = document.getElementById('badgeId').textContent;
+    const badgeName = document.getElementById('badgeName').textContent;
+    const company = document.getElementById('badgeCompany').textContent;
+
+    ctx.fillStyle = '#ffffff'; ctx.roundRect(0, 0, 400, 550, 16); ctx.fill();
+    const gradient = ctx.createLinearGradient(0, 0, 400, 0);
+    gradient.addColorStop(0, '#10b981'); gradient.addColorStop(1, '#0ea5e9'); // Emerald to Sky
+    ctx.fillStyle = gradient; ctx.fillRect(0, 0, 400, 8);
+
+    ctx.fillStyle = '#0ea5e9'; ctx.font = 'bold 16px Inter, sans-serif'; ctx.textAlign = 'center';
+    ctx.fillText(company.toUpperCase(), 200, 40);
+
+    ctx.fillStyle = '#10b981'; ctx.font = 'bold 11px Inter, sans-serif'; ctx.letterSpacing = '3px';
+    ctx.fillText('EMPLOYEE ID', 200, 70);
+
+    ctx.fillStyle = '#0f172a'; ctx.font = 'bold 28px Inter, sans-serif'; ctx.fillText(badgeId, 200, 115);
+    ctx.fillStyle = '#334155'; ctx.font = '600 18px Inter, sans-serif'; ctx.fillText(badgeName, 200, 150);
+
+    const qrImg = document.querySelector('#qrcode img');
+    if (qrImg && qrImg.complete) ctx.drawImage(qrImg, 100, 180, 200, 200);
+
+    ctx.fillStyle = '#94a3b8'; ctx.font = '10px Inter, sans-serif';
+    ctx.fillText('PROPERTY OF ' + company, 200, 500);
+
+    const link = document.createElement('a');
+    link.download = badgeId + '.png'; link.href = canvas.toDataURL('image/png'); link.click();
+  }
+
+  window.addEventListener('load', () => {
+    showLoader(false);
+    google.script.run.withSuccessHandler(settings => {
+      document.getElementById('companyName').textContent = settings.COMPANY_NAME || 'instapresensi';
+      populateDepartments(settings.DEPARTMENTS);
+    }).getSettings();
+  });
+</script>

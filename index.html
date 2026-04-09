@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <?!= include('styles'); ?>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;800&display=swap" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+</head>
+<body>
+  <div class="glass-container">
+    <header>
+      <h1 id="companyName">Instapresensi</h1>
+      <p id="tagline">Smart Attendance System</p>
+    </header>
+
+    <main id="app">
+      <!-- HOME SCREEN (4 PILL BUTTONS) -->
+      <section id="home" class="active">
+        <div class="pill-grid">
+          <button class="pill btn-in" onclick="navigateTo('clockin')">
+            <span class="pill-icon">☀️</span>
+            <span class="pill-text">CLOCK-IN</span>
+          </button>
+          <button class="pill btn-out" onclick="navigateTo('clockout')">
+            <span class="pill-icon">🌙</span>
+            <span class="pill-text">CLOCK-OUT</span>
+          </button>
+          <button class="pill btn-reg" onclick="navigateTo('registration')">
+            <span class="pill-icon">📝</span>
+            <span class="pill-text">REGISTRATION</span>
+          </button>
+          <button class="pill btn-settings" onclick="openSettings()">
+            <span class="pill-icon">⚙️</span>
+            <span class="pill-text">SETTINGS</span>
+          </button>
+        </div>
+      </section>
+
+      <!-- REGISTRATION FORM (NEW EMPLOYEE) -->
+      <section id="registration">
+        <h2>New Employee</h2>
+        <form id="regForm">
+          <div class="form-grid">
+            <input type="text" name="name" placeholder="Full Name" required>
+            <input type="text" name="nik" placeholder="NIK / ID Karyawan" required>
+            <select name="department" id="regDept" required>
+              <option value="" disabled selected>Select Department</option>
+            </select>
+            <input type="tel" name="phone" placeholder="Phone Number" required>
+          </div>
+          <div class="actions">
+            <button type="button" class="btn btn-back" onclick="navigateTo('home')">BACK</button>
+            <button type="button" class="btn btn-primary" onclick="goToCamera('register')">NEXT: PHOTO</button>
+          </div>
+        </form>
+      </section>
+
+      <!-- PHOTO & LOCATION CAPTURE SCREEN -->
+      <section id="camera">
+        <h2>Verifikasi Wajah & Lokasi</h2>
+        <div class="location-status" id="locationStatus">
+          📍 Mendapatkan lokasi...
+        </div>
+        <div class="photo-capture-area">
+          <div id="photoPlaceholder" class="photo-placeholder">
+            <div class="placeholder-icon">📸</div>
+            <p>Tap tombol untuk ambil foto</p>
+          </div>
+          <video id="video-stream" autoplay playsinline style="display:none; width:100%; max-height:400px; object-fit:cover; border-radius:12px;"></video>
+          <canvas id="photo-canvas" style="display:none;"></canvas>
+          <img id="photo-preview" class="photo-result" style="display:none">
+          <input type="file" id="fileInput" accept="image/*" capture="user" style="display:none" onchange="handlePhotoCapture(event)">
+        </div>
+        <div class="actions" style="flex-wrap: wrap;">
+          <button type="button" class="btn btn-back" onclick="navigateTo('home')">BACK</button>
+          <button type="button" id="snapBtn" class="btn btn-snap" onclick="takeSnapshot()">📸 AMBIL FOTO</button>
+          <button type="button" id="submitBtn" class="btn btn-primary" style="display:none; width: 100%; margin-top: 10px;" onclick="finalizeAction()">✅ SUBMIT ABSEN</button>
+          <button type="button" id="retakeBtn" class="btn btn-secondary" style="display:none; width: 100%; margin-top: 10px;" onclick="retakePhoto()">ULANGI</button>
+        </div>
+      </section>
+
+      <!-- CLOCK-IN SCREEN -->
+      <section id="clockin">
+        <h2>Clock-In (Hadir)</h2>
+        <p>Masukkan NIK atau Scan QR Code Anda</p>
+        <div class="input-entry">
+          <input type="text" id="clockInId" placeholder="Masukkan NIK" class="input-large" onkeypress="handleScanner(event, 'clockin')">
+          <button type="button" class="btn btn-scan" onclick="scanQR('clockInId')">
+            📷 SCAN QR CODE
+          </button>
+          <div class="actions">
+            <button type="button" class="btn btn-back" onclick="navigateTo('home')">BACK</button>
+            <button type="button" class="btn btn-primary" onclick="goToCamera('clockin')">LANJUT ABSEN</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- CLOCK-OUT SCREEN -->
+      <section id="clockout">
+        <h2>Clock-Out (Pulang)</h2>
+        <p>Masukkan NIK atau Scan QR Code Anda</p>
+        <div class="input-entry">
+          <input type="text" id="clockOutId" placeholder="Masukkan NIK" class="input-large" onkeypress="handleScanner(event, 'clockout')">
+          <button type="button" class="btn btn-scan" onclick="scanQR('clockOutId')">
+            📷 SCAN QR CODE
+          </button>
+          <div class="actions">
+            <button type="button" class="btn btn-back" onclick="navigateTo('home')">BACK</button>
+            <button type="button" class="btn btn-primary" onclick="goToCamera('clockout')">LANJUT ABSEN</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- SUCCESS SCREEN -->
+      <section id="success">
+        <div class="success-icon">✅</div>
+        <h2 id="successTitle">Berhasil!</h2>
+        <p id="successMessage"></p>
+        <div id="badgeArea" style="display:none">
+          <div class="badge" id="badgeCard">
+            <div class="badge-company" id="badgeCompany">instapresensi</div>
+            <div class="badge-header">EMPLOYEE ID</div>
+            <div id="badgeId" class="badge-id">---</div>
+            <div id="badgeName" class="badge-name">---</div>
+            <div id="badgeDate" class="badge-date"></div>
+            <div id="qrcode" class="qr"></div>
+          </div>
+          <div class="badge-actions">
+            <button type="button" class="btn btn-download" onclick="downloadBadge()">⬇️ DOWNLOAD ID</button>
+          </div>
+        </div>
+        <button class="btn btn-primary" onclick="resetApp()" style="margin-top: 2rem;">SELESAI</button>
+      </section>
+
+      <!-- SETTINGS SCREEN -->
+      <section id="settings">
+        <h2>App Settings</h2>
+        <form id="settingsForm">
+          <label>Company Name</label>
+          <input type="text" name="COMPANY_NAME" id="setCompanyName">
+          <label>Notification URLs (Comma separated)</label>
+          <textarea name="NOTIFICATION_URLS" id="setUrls" style="width:100%; height:80px; background:rgba(255,255,255,0.05); border:1px solid var(--glass-border); color:white; border-radius:12px; padding:10px;"></textarea>
+          <label>Drive Folder ID</label>
+          <input type="text" name="DRIVE_FOLDER_ID" id="setFolderId">
+          <label>Departments (Comma separated)</label>
+          <input type="text" name="DEPARTMENTS" id="setDeptOptions" placeholder="IT, HR, Finance, dll.">
+          <div class="actions">
+            <button type="button" class="btn btn-back" onclick="navigateTo('home')">CLOSE</button>
+            <button type="button" class="btn btn-primary" onclick="saveSettings()">SAVE</button>
+          </div>
+        </form>
+      </section>
+
+      <!-- LOADING -->
+      <div id="loader" class="loader-overlay">
+        <div class="spinner"></div>
+        <p>Memproses data...</p>
+      </div>
+    </main>
+  </div>
+
+  <?!= include('scripts'); ?>
+</body>
+</html>
